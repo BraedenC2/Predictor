@@ -1,26 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
-
-    <!-- THE MANIFESTO: Permissions required for the Sensory System -->
-
-    <!-- To know what app is currently running -->
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-
-    <!-- To know where we are (Context) -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-
-    <!-- To know if we are walking, driving, or still -->
-    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-
-    <!-- To update the user via notifications if needed -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- To check Wi-Fi state -->
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    xmlns:tools="http://schemas.android.com/tools" >
 
     <application
         android:allowBackup="true"
@@ -30,21 +10,18 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Predictor"
-        tools:targetApi="31">
-
+        android:theme="@style/Theme.Predictor" >
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Predictor">
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Predictor" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- We will register the Receiver and Worker here in Phase 2 -->
-
     </application>
 
 </manifest>
