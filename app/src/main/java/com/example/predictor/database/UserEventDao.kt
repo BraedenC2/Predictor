@@ -12,8 +12,10 @@ interface UserEventDao {
     @Query("SELECT * FROM user_events")
     suspend fun getAllEvents(): List<UserEvent>
 
-    // NEW: We fetch all events for a specific physical activity (e.g., "WALKING")
-    // The "Brain" will handle the complex time math later.
+    // NEW: Fetch only the last 30 days of data to keep predictions fast.
+    @Query("SELECT * FROM user_events WHERE timestamp > :minTimestamp")
+    suspend fun getRecentEvents(minTimestamp: Long): List<UserEvent>
+
     @Query("SELECT * FROM user_events WHERE activityType = :activity")
     suspend fun getEventsByActivity(activity: String): List<UserEvent>
 }

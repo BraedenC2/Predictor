@@ -14,9 +14,14 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.speech.tts.TextToSpeech
+import android.view.KeyEvent
 import androidx.core.app.NotificationCompat
 import com.example.predictor.MainActivity
 import com.example.predictor.R
+import com.example.predictor.logic.BayesianPredictor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -26,11 +31,12 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
     private lateinit var sensorReceiver: SensorReceiver
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
+    private val scope = CoroutineScope(Dispatchers.Main)
 
-    // CONFIGURATION
-    private val SLEEP_GOAL_MINUTES = 500L // 8h 20m
-    private val NEW_NIGHT_HOUR = 22      // 10 PM
-    private val WAKE_UP_HOUR = 6         // 6 AM
+    // CONFIGURATION (Now actually used!)
+    private val SLEEP_GOAL_MINUTES = 500L       // 8h 20m
+    private val NEW_NIGHT_HOUR = 22             // 10 PM
+    private val WAKE_UP_HOUR = 6                // 6 AM
     private val FALSE_SLEEP_MS = 60 * 60 * 1000L // 1 Hour
     private val INSOMNIA_DELAY_MS = 20 * 60 * 1000L // 20 Minutes
 
@@ -42,21 +48,19 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
         super.onCreate()
         startForegroundService()
 
-        // Initialize TTS
         tts = TextToSpeech(this, this)
 
-        // Register Sensors
         sensorReceiver = SensorReceiver()
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_HEADSET_PLUG)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT) // Detects Unlock
         }
         registerReceiver(sensorReceiver, filter, RECEIVER_EXPORTED)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Handle "Speak" Command from AlarmReceiver
         if (intent?.action == ACTION_SPEAK_ALARM) {
             speakMorningMessage()
         }
@@ -88,42 +92,65 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("Predictor is Active")
-            .setContentText("Tracking Sleep & Context...")
+            .setContentText("Reading your mind...")
             .setSmallIcon(R.mipmap.ic_launcher_round)
             .build()
 
         startForeground(1, notification)
     }
 
-    // --- TTS LOGIC ---
+    // --- WOW FEATURE 1: MIND READER (App Telepathy) ---
+    private fun attemptMindReading() {
+        scope.launch {
+            // 1. Gather Context
+            val calendar = Calendar.getInstance()
+            val hour = calendar.get(Calendar.HOUR_OF_DAY)
+            // Defaulting location for speed/privacy on unlock
+            val lat = 0.0
+            val lon = 0.0
+            val isHeadphones = checkHeadphones()
 
-    private fun speakMorningMessage() {
-        if (!isTtsReady) return
+            // 2. Predict
+            val predictor = BayesianPredictor(this@PredictorService)
+            val predictedApp = predictor.predictTopApp("UNKNOWN", hour, isHeadphones, lat, lon)
 
-        val calendar = Calendar.getInstance()
+            if (predictedApp != "No Prediction") {
+                launchApp(predictedApp)
+            }
+        }
+    }
 
-        // Formats: "10:30 AM", "Wednesday", "December 10, 2025"
-        val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
-        val dayNameFormat = SimpleDateFormat("EEEE", Locale.US)
-        val fullDateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.US)
+    private fun launchApp(packageName: String) {
+        try {
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(launchIntent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
-        val timeStr = timeFormat.format(calendar.time)
-        val dayName = dayNameFormat.format(calendar.time)
-        val dateStr = fullDateFormat.format(calendar.time)
-
-        val message = "Good Morning, Braeden. The time right now is $timeStr. Today is $dayName, $dateStr."
-
-        // Set volume to max for the alarm speech
+    // --- WOW FEATURE 2: THE PHANTOM DJ ---
+    private fun triggerPhantomDj() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
 
-        // Speak!
-        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "morning_alarm")
+        // Simulate Media Button Press
+        val eventDown = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY)
+        val eventUp = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY)
+
+        audioManager.dispatchMediaKeyEvent(eventDown)
+        audioManager.dispatchMediaKeyEvent(eventUp)
+
+        if (isTtsReady) {
+            tts?.speak("Phantom DJ Active", TextToSpeech.QUEUE_FLUSH, null, null)
+        }
     }
 
-    // --- SLEEP LOGIC ---
-
+    // --- SLEEP TRACKER LOGIC (Restored) ---
     private fun handleScreenOff() {
         val prefs = getSharedPreferences("PredictorSleep", Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
@@ -131,8 +158,10 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
         val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
         val currentDay = calendar.get(Calendar.DAY_OF_YEAR)
 
+        // If it's daytime, ignore
         if (currentHour in WAKE_UP_HOUR until NEW_NIGHT_HOUR) return
 
+        // New Night Reset
         val lastResetDay = prefs.getInt("last_reset_day", -1)
         if (currentHour >= NEW_NIGHT_HOUR && currentDay != lastResetDay) {
             prefs.edit().putLong("sleep_bank_minutes", 0).putInt("last_reset_day", currentDay).apply()
@@ -164,6 +193,7 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
         val durationMillis = now - sleepStart
         val durationMinutes = durationMillis / 1000 / 60
 
+        // Reset alarm logic when waking up
         if (currentHour >= WAKE_UP_HOUR) {
             if (durationMinutes > 0) {
                 val currentBank = prefs.getLong("sleep_bank_minutes", 0)
@@ -178,6 +208,7 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
             return
         }
 
+        // Insomnia / False Sleep logic
         if (durationMillis < 0) {
             cancelSystemAlarm()
             return
@@ -211,6 +242,18 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
         alarmManager.cancel(pendingIntent)
     }
 
+    // --- ALARM SPEAKER ---
+    private fun speakMorningMessage() {
+        if (!isTtsReady) return
+        val calendar = Calendar.getInstance()
+        val timeFormat = SimpleDateFormat("h:mm a", Locale.US)
+        val message = "Good Morning. It is ${timeFormat.format(calendar.time)}."
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
+        tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "morning_alarm")
+    }
+
     private fun sendNotification(title: String, text: String) {
         val notificationManager = getSystemService(NotificationManager::class.java)
         val notification = NotificationCompat.Builder(this, "predictor_service_channel")
@@ -222,27 +265,33 @@ class PredictorService : Service(), TextToSpeech.OnInitListener {
         notificationManager.notify(2002, notification)
     }
 
+    private fun checkHeadphones(): Boolean {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        return devices.any {
+            it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+        }
+    }
+
     // --- RECEIVER ---
     inner class SensorReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_OFF -> handleScreenOff()
                 Intent.ACTION_SCREEN_ON -> handleScreenOn()
+
+                // WOW FEATURE 1: App Telepathy
+                Intent.ACTION_USER_PRESENT -> {
+                    attemptMindReading()
+                }
+
+                // WOW FEATURE 2: Phantom DJ
                 Intent.ACTION_HEADSET_PLUG -> {
                     val state = intent.getIntExtra("state", -1)
-                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    val prefs = context.getSharedPreferences("PredictorPrefs", Context.MODE_PRIVATE)
-
-                    if (state == 1) {
-                        val learnedVol = prefs.getInt("user_headphone_vol", -1)
-                        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                        val targetVol = if (learnedVol != -1) learnedVol.coerceAtMost(maxVol) else (maxVol * 0.7).toInt()
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, AudioManager.FLAG_SHOW_UI)
-                    } else if (state == 0) {
-                        val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                        prefs.edit().putInt("user_headphone_vol", currentVol).apply()
-                        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.3).toInt(), 0)
+                    if (state == 1) { // Plugged In
+                        triggerPhantomDj()
                     }
                 }
             }

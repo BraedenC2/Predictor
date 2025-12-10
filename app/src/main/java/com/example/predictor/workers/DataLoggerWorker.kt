@@ -10,6 +10,7 @@ import androidx.work.WorkerParameters
 import com.example.predictor.database.AppDatabase
 import com.example.predictor.database.UserEvent
 import com.example.predictor.logic.BayesianPredictor
+import com.example.predictor.sensors.ActivityTransitionReceiver
 import com.example.predictor.sensors.UsageCollector
 import java.util.Calendar
 
@@ -20,43 +21,39 @@ class DataLoggerWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            // 1. Gather Time
             val calendar = Calendar.getInstance()
             val hour = calendar.get(Calendar.HOUR_OF_DAY)
             val minute = calendar.get(Calendar.MINUTE)
             val day = calendar.get(Calendar.DAY_OF_WEEK)
 
-            // 2. Gather App Usage
             val usageCollector = UsageCollector(context)
             val currentApp = usageCollector.getCurrentApp()
 
-            // 3. Gather Hardware
             val isHeadphones = checkHeadphones()
             val location = getBestLocation()
             val lat = location?.latitude ?: 0.0
             val lon = location?.longitude ?: 0.0
 
-            // [DELETED] Old Auto-DJ logic removed to prevent conflicts
+            val currentActivity = ActivityTransitionReceiver.currentActivity
 
-            // 4. Create the Record
+            // REMOVED: Wifi scanning logic
+
             val event = UserEvent(
                 timestamp = System.currentTimeMillis(),
                 hourOfDay = hour,
                 minute = minute,
                 dayOfWeek = day,
-                activityType = "UNKNOWN",
+                activityType = currentActivity,
                 isHeadphonesConnected = isHeadphones,
-                wifiSsid = "None",
+                wifiSsid = "None", // Feature Disabled
                 latitude = lat,
                 longitude = lon,
                 appPackageName = currentApp
             )
 
-            // 5. Save to Database
             val database = AppDatabase.getDatabase(context)
             database.userEventDao().insertEvent(event)
 
-            // 6. Update Widget
             val widgetManager = android.appwidget.AppWidgetManager.getInstance(context)
             val widgetIds = widgetManager.getAppWidgetIds(
                 android.content.ComponentName(context, com.example.predictor.PredictorWidget::class.java)
@@ -65,7 +62,6 @@ class DataLoggerWorker(
                 com.example.predictor.PredictorWidget.updateAppWidget(context, widgetManager, widgetIds[0])
             }
 
-            // 7. Smart Traffic Alert
             val predictor = BayesianPredictor(context)
             val mapsProb = predictor.calculateAppProbabilityAtTime("com.google.android.apps.maps", hour)
             if (mapsProb > 0.4) {
@@ -80,6 +76,7 @@ class DataLoggerWorker(
     }
 
     // --- Helper Functions ---
+    // REMOVED: getWifiSsid()
 
     private fun sendDrivingNotification() {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager

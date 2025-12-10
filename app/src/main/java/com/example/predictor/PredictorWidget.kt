@@ -18,15 +18,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Calendar
-// Imports for WiFi/Headphones context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.wifi.WifiInfo
 
 class PredictorWidget : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        // Perform this loop procedure for each App Widget that belongs to this provider
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId)
         }
@@ -36,22 +31,21 @@ class PredictorWidget : AppWidgetProvider() {
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val scope = CoroutineScope(Dispatchers.IO)
             scope.launch {
-// 1. GATHER CONTEXT
+                // 1. GATHER CONTEXT
                 val calendar = Calendar.getInstance()
                 val hour = calendar.get(Calendar.HOUR_OF_DAY)
                 val activity = ActivityTransitionReceiver.currentActivity
-                val wifi = getWifiSsid(context)
+                // REMOVED: wifi fetching
                 val headphones = checkHeadphones(context)
 
-                // NEW: Get Location for prediction
                 val location = getBestLocation(context)
                 val lat = location?.latitude ?: 0.0
                 val lon = location?.longitude ?: 0.0
 
                 // 2. ASK THE BRAIN
                 val predictor = BayesianPredictor(context)
-                // Pass lat/long here
-                val predictedPkg = predictor.predictTopApp(activity, hour, headphones, wifi, lat, lon)
+                // REMOVED: wifi passed to predictTopApp
+                val predictedPkg = predictor.predictTopApp(activity, hour, headphones, lat, lon)
 
                 // 3. PREPARE THE VIEW
                 val views = RemoteViews(context.packageName, R.layout.widget_predictor_layout)
@@ -60,12 +54,9 @@ class PredictorWidget : AppWidgetProvider() {
                 if (predictedPkg != "No Prediction") {
                     try {
                         val packageManager = context.packageManager
-
-                        // SAFETY CHECK 1: Can we actually launch this app?
                         val launchIntent = packageManager.getLaunchIntentForPackage(predictedPkg)
 
                         if (launchIntent != null) {
-                            // Yes, it's a real app (like Spotify). Show it.
                             val appIcon = packageManager.getApplicationIcon(predictedPkg)
                             val appLabel = packageManager.getApplicationLabel(
                                 packageManager.getApplicationInfo(predictedPkg, 0)
@@ -82,17 +73,13 @@ class PredictorWidget : AppWidgetProvider() {
                             )
                             views.setOnClickPendingIntent(R.id.widget_icon, pendingIntent)
                         } else {
-                            // No, it's a background process (like 'com.android.systemui').
-                            // Treat it as "Learning..." instead of crashing.
                             views.setImageViewResource(R.id.widget_icon, android.R.drawable.sym_def_app_icon)
                             views.setTextViewText(R.id.widget_text, "Learning...")
-                            // Remove click action
                             views.setOnClickPendingIntent(R.id.widget_icon, null)
                         }
 
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        // SAFETY CHECK 2: Show the specific error so we know what to fix
                         views.setTextViewText(R.id.widget_text, "Err: ${e.javaClass.simpleName}")
                     }
                 } else {
@@ -100,7 +87,6 @@ class PredictorWidget : AppWidgetProvider() {
                     views.setTextViewText(R.id.widget_text, "Learning...")
                 }
 
-                // 5. UPDATE THE WIDGET
                 appWidgetManager.updateAppWidget(appWidgetId, views)
             }
         }
@@ -119,7 +105,6 @@ class PredictorWidget : AppWidgetProvider() {
             return bestLocation
         }
 
-        // --- Helpers ---
         private fun drawableToBitmap(drawable: Drawable): Bitmap {
             if (drawable is BitmapDrawable) return drawable.bitmap
             val bitmap = Bitmap.createBitmap(drawable.intrinsicWidth, drawable.intrinsicHeight, Bitmap.Config.ARGB_8888)
@@ -129,18 +114,7 @@ class PredictorWidget : AppWidgetProvider() {
             return bitmap
         }
 
-
-        // (We duplicate these small helpers here to keep the Widget standalone)
-        private fun getWifiSsid(context: Context): String {
-            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val activeNetwork = cm.activeNetwork ?: return "None"
-            val caps = cm.getNetworkCapabilities(activeNetwork) ?: return "None"
-            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                val info = caps.transportInfo as? WifiInfo
-                return info?.ssid?.replace("\"", "") ?: "None"
-            }
-            return "None"
-        }
+        // REMOVED: getWifiSsid helper
 
         private fun checkHeadphones(context: Context): Boolean {
             val am = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
