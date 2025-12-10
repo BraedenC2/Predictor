@@ -51,6 +51,14 @@ class DataLoggerWorker(
             val database = AppDatabase.getDatabase(context)
             database.userEventDao().insertEvent(event)
 
+            // NEW: Update the Widget immediately after saving new data
+            val widgetManager = android.appwidget.AppWidgetManager.getInstance(context)
+            val widgetIds = widgetManager.getAppWidgetIds(
+                android.content.ComponentName(context, com.example.predictor.PredictorWidget::class.java)
+            )
+            // Trigger the widget update logic
+            com.example.predictor.PredictorWidget.updateAppWidget(context, widgetManager, widgetIds[0])
+
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()

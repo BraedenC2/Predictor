@@ -12,7 +12,8 @@ interface UserEventDao {
     @Query("SELECT * FROM user_events")
     suspend fun getAllEvents(): List<UserEvent>
 
-    // NEW: We fetch by activity, then filter the specific time details in the Logic class
+    // NEW: We fetch all events for a specific physical activity (e.g., "WALKING")
+    // The "Brain" will handle the complex time math later.
     @Query("SELECT * FROM user_events WHERE activityType = :activity")
     suspend fun getEventsByActivity(activity: String): List<UserEvent>
 }
