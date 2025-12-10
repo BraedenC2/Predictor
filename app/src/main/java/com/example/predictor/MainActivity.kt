@@ -44,6 +44,14 @@ class MainActivity : ComponentActivity() {
 
         createNotificationChannel()
 
+        // 1. Start the Always-On Service (NEW)
+        val serviceIntent = android.content.Intent(this, com.example.predictor.services.PredictorService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
         // 1. Schedule Background Worker
         val workRequest = PeriodicWorkRequestBuilder<DataLoggerWorker>(15, TimeUnit.MINUTES)
             .build()
