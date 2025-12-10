@@ -190,6 +190,24 @@ class MainActivity : ComponentActivity() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // NEW: Sleep Reset Button
+            Button(
+                onClick = {
+                    val prefs = getSharedPreferences("PredictorSleep", Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putLong("sleep_bank_minutes", 0)
+                        .putLong("sleep_start_timestamp", 0)
+                        .putBoolean("require_resume_delay", false)
+                        .apply()
+
+                    android.widget.Toast.makeText(this@MainActivity, "Sleep Bank Reset to 0m", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) {
+                Text("Manual Sleep Reset")
+            }
+
             Button(
                 onClick = {
                     scope.launch {
