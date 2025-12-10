@@ -1,16 +1,15 @@
 package com.example.predictor.workers
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Location
+import android.location.LocationManager
 import android.media.AudioManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.wifi.WifiInfo
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.predictor.database.AppDatabase
 import com.example.predictor.database.UserEvent
 import com.example.predictor.logic.BayesianPredictor
-import com.example.predictor.sensors.ActivityTransitionReceiver
 import com.example.predictor.sensors.UsageCollector
 import java.util.Calendar
 
@@ -21,31 +20,33 @@ class DataLoggerWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            // 1. Gather Context Data
+            // 1. Gather Time
             val calendar = Calendar.getInstance()
             val hour = calendar.get(Calendar.HOUR_OF_DAY)
-            val minute = calendar.get(Calendar.MINUTE) // NEW: Get Minute
+            val minute = calendar.get(Calendar.MINUTE)
             val day = calendar.get(Calendar.DAY_OF_WEEK)
 
-            // 2. Sensors
+            // 2. Gather App Usage
             val usageCollector = UsageCollector(context)
-            // Fix: This now looks back 5 minutes, so it won't return "UNKNOWN" as often
             val currentApp = usageCollector.getCurrentApp()
-            val currentActivity = ActivityTransitionReceiver.currentActivity
 
-            // 3. Hardware Checks
+            // 3. Gather Hardware (Headphones & Location)
             val isHeadphones = checkHeadphones()
-            val wifiSsid = checkWifiSsid()
+            val location = getBestLocation()
+            val lat = location?.latitude ?: 0.0
+            val lon = location?.longitude ?: 0.0
 
             // 4. Create the Record
             val event = UserEvent(
                 timestamp = System.currentTimeMillis(),
                 hourOfDay = hour,
-                minute = minute, // NEW: Save Minute
+                minute = minute,
                 dayOfWeek = day,
-                activityType = currentActivity,
+                activityType = "UNKNOWN",  // Disabled
                 isHeadphonesConnected = isHeadphones,
-                wifiSsid = wifiSsid,
+                wifiSsid = "None",         // Disabled
+                latitude = lat,
+                longitude = lon,
                 appPackageName = currentApp
             )
 
@@ -62,13 +63,15 @@ class DataLoggerWorker(
                 com.example.predictor.PredictorWidget.updateAppWidget(context, widgetManager, widgetIds[0])
             }
 
-            // 7. Smart Alert (Traffic)
-            if (currentActivity != "DRIVING" && currentActivity != "IN_VEHICLE") {
-                val predictor = BayesianPredictor(context)
-                val drivingProb = predictor.calculateActivityProbability("DRIVING", hour)
-                if (drivingProb > 0.5) {
-                    sendDrivingNotification()
-                }
+            // 7. SMART ALERT (TRAFFIC PREDICTION)
+            // This is the new part. It asks the Brain: "Is it time for Maps?"
+            val predictor = BayesianPredictor(context)
+            // You can change "com.google.android.apps.maps" to any app you want alerts for
+            val mapsProb = predictor.calculateAppProbabilityAtTime("com.google.android.apps.maps", hour)
+
+            // If probability > 40%, send a notification
+            if (mapsProb > 0.4) {
+                sendDrivingNotification()
             }
 
             Result.success()
@@ -78,10 +81,12 @@ class DataLoggerWorker(
         }
     }
 
+    // --- Helper Functions ---
+
     private fun sendDrivingNotification() {
-        // (Notification code same as before...)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         val mapsIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.apps.maps")
+
         if (mapsIntent != null) {
             val pendingIntent = android.app.PendingIntent.getActivity(
                 context, 1, mapsIntent,
@@ -99,32 +104,28 @@ class DataLoggerWorker(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun getBestLocation(): Location? {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val providers = locationManager.getProviders(true)
+        var bestLocation: Location? = null
+
+        for (provider in providers) {
+            val l = locationManager.getLastKnownLocation(provider) ?: continue
+            if (bestLocation == null || l.accuracy < bestLocation.accuracy) {
+                bestLocation = l
+            }
+        }
+        return bestLocation
+    }
+
     private fun checkHeadphones(): Boolean {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-        for (device in outputs) {
-            val type = device.type
-            if (type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
-                return true
-            }
+        return outputs.any {
+            it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    it.type == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    it.type == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
         }
-        return false
-    }
-
-    private fun checkWifiSsid(): String {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = connectivityManager.activeNetwork ?: return "None"
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return "None"
-
-        if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            val wifiInfo = capabilities.transportInfo as? WifiInfo
-            val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "None"
-            // Fix: Android sometimes returns literally "<unknown ssid>" when location is flaky
-            if (ssid == "<unknown ssid>") return "None"
-            return ssid
-        }
-        return "None"
     }
 }

@@ -1,10 +1,10 @@
 package com.example.predictor
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.wifi.WifiInfo
+import android.location.Location
+import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,12 +17,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.OneTimeWorkRequestBuilder
 import com.example.predictor.logic.BayesianPredictor
 import com.example.predictor.sensors.ActivitySensor
-import com.example.predictor.sensors.ActivityTransitionReceiver
 import com.example.predictor.sensors.UsageCollector
 import com.example.predictor.ui.theme.PredictorTheme
 import com.example.predictor.workers.DataLoggerWorker
@@ -44,6 +43,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         createNotificationChannel()
+
         // 1. Schedule Background Worker
         val workRequest = PeriodicWorkRequestBuilder<DataLoggerWorker>(15, TimeUnit.MINUTES)
             .build()
@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
             workRequest
         )
 
-        // 2. Start Sensors
+        // 2. Start Sensors (ActivitySensor is mostly disabled now, but we keep it running to not break flows)
         val activitySensor = ActivitySensor(this)
         activitySensor.startMonitoring()
 
@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
 
         // Time Machine State
         var isTimeMachineEnabled by remember { mutableStateOf(false) }
-        var timeMachineHour by remember { mutableFloatStateOf(12f) } // 12 PM default
+        var timeMachineHour by remember { mutableFloatStateOf(12f) }
 
         // --- TURBO MODE ---
         val context = androidx.compose.ui.platform.LocalContext.current
@@ -144,7 +144,6 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header
             Text(
                 text = if (isTimeMachineEnabled) "Time Machine Mode" else "Predictor: TURBO MODE",
                 style = MaterialTheme.typography.headlineMedium,
@@ -153,7 +152,7 @@ class MainActivity : ComponentActivity() {
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // TIME MACHINE CONTROLS
+            // TIME MACHINE CARD
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -175,7 +174,7 @@ class MainActivity : ComponentActivity() {
                             value = timeMachineHour,
                             onValueChange = { timeMachineHour = it },
                             valueRange = 0f..23f,
-                            steps = 22 // Allows snapping to exact hours
+                            steps = 22
                         )
                     }
                 }
@@ -183,16 +182,18 @@ class MainActivity : ComponentActivity() {
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // PREDICTION BUTTON
             Button(
                 onClick = {
                     scope.launch {
                         // 1. Gather Context
-                        val activity = ActivityTransitionReceiver.currentActivity
-                        val wifi = getWifiSsid(this@MainActivity)
                         val headphones = checkHeadphones(this@MainActivity)
 
-                        // LOGIC: Use Real Time OR Fake Time?
+                        // NEW: Get Location
+                        val location = getBestLocation(this@MainActivity)
+                        val lat = location?.latitude ?: 0.0
+                        val lon = location?.longitude ?: 0.0
+
+                        // Logic: Real Time OR Fake Time?
                         val calendar = Calendar.getInstance()
                         val hour = if (isTimeMachineEnabled) {
                             timeMachineHour.roundToInt()
@@ -200,11 +201,19 @@ class MainActivity : ComponentActivity() {
                             calendar.get(Calendar.HOUR_OF_DAY)
                         }
 
-                        currentDetails = "Activity: $activity\nTime: $hour:00\nWiFi: $wifi\nHeadphones: $headphones"
+                        // Updated Display: Shows GPS instead of Activity/Wifi
+                        currentDetails = "Time: $hour:00\nHeadphones: $headphones\nGPS: ${"%.3f".format(lat)}, ${"%.3f".format(lon)}"
 
-                        // 2. Ask the Brain
+                        // 2. Ask the Brain (Passing "UNKNOWN"/"None" for the disabled fields)
                         val predictor = BayesianPredictor(this@MainActivity)
-                        val result = predictor.predictTopApp(activity, hour, headphones, wifi)
+                        val result = predictor.predictTopApp(
+                            currentActivity = "UNKNOWN",
+                            currentHour = hour,
+                            isHeadphones = headphones,
+                            currentWifi = "None",
+                            currentLat = lat,
+                            currentLong = lon
+                        )
 
                         prediction = result.substringAfterLast(".")
                     }
@@ -231,15 +240,19 @@ class MainActivity : ComponentActivity() {
 
     // --- Helper Functions ---
 
-    private fun getWifiSsid(context: Context): String {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = cm.activeNetwork ?: return "None"
-        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return "None"
-        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            val info = caps.transportInfo as? WifiInfo
-            return info?.ssid?.replace("\"", "") ?: "None"
+    @SuppressLint("MissingPermission")
+    private fun getBestLocation(context: Context): Location? {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val providers = locationManager.getProviders(true)
+        var bestLocation: Location? = null
+
+        for (provider in providers) {
+            val l = locationManager.getLastKnownLocation(provider) ?: continue
+            if (bestLocation == null || l.accuracy < bestLocation.accuracy) {
+                bestLocation = l
+            }
         }
-        return "None"
+        return bestLocation
     }
 
     private fun checkHeadphones(context: Context): Boolean {

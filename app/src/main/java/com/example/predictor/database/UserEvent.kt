@@ -8,10 +8,12 @@ data class UserEvent(
     @PrimaryKey(autoGenerate = true) val uid: Int = 0,
     val timestamp: Long,
     val hourOfDay: Int,
-    val minute: Int,                // NEW: Precision tracking (0-59)
+    val minute: Int,
     val dayOfWeek: Int,
     val activityType: String,
     val isHeadphonesConnected: Boolean,
     val wifiSsid: String,
+    val latitude: Double,   // NEW: Location Data
+    val longitude: Double,  // NEW: Location Data
     val appPackageName: String
 )

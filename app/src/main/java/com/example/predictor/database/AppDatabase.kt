@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [UserEvent::class], version = 2, exportSchema = false) // VERSION 2
+@Database(entities = [UserEvent::class], version = 3, exportSchema = false) // VERSION 3
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userEventDao(): UserEventDao
 
@@ -20,7 +20,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "predictor_database"
                 )
-                    .fallbackToDestructiveMigration() // Wipe old data since we changed the columns
+                    .fallbackToDestructiveMigration() // Wipe data for the new columns
                     .build()
                 INSTANCE = instance
                 instance

@@ -1,36 +1,35 @@
 package com.example.predictor.logic
 
 import android.content.Context
+import android.location.Location
 import com.example.predictor.database.AppDatabase
-import com.example.predictor.database.UserEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 class BayesianPredictor(private val context: Context) {
 
-    // The main function: Returns the Package Name of the predicted app (e.g., "com.spotify.music")
     suspend fun predictTopApp(
-        currentActivity: String,
+        currentActivity: String, // Kept for compatibility, but ignored
         currentHour: Int,
         isHeadphones: Boolean,
-        currentWifi: String
+        currentWifi: String,     // Kept for compatibility, but ignored
+        currentLat: Double,
+        currentLong: Double
     ): String {
         return withContext(Dispatchers.IO) {
             val db = AppDatabase.getDatabase(context)
             val dao = db.userEventDao()
 
-            // 1. Broad Filter: Get all history for this physical activity (e.g., "WALKING")
-            val rawHistory = dao.getEventsByActivity(currentActivity)
+            // FIX: Get ALL history (We don't filter by Activity anymore)
+            val rawHistory = dao.getAllEvents()
 
             if (rawHistory.isEmpty()) return@withContext "No Prediction"
 
-            // 2. Score the Apps
             val appScores = HashMap<String, Double>()
 
             for (event in rawHistory) {
-                // Filter: Time Window (+/- 2 hours)
-                // We handle the "Midnight Problem" (e.g., 23:00 vs 01:00) using modulo math
+                // 1. Time Score (+/- 2 hours)
                 val hourDiff = minOf(
                     abs(event.hourOfDay - currentHour),
                     24 - abs(event.hourOfDay - currentHour)
@@ -39,47 +38,43 @@ class BayesianPredictor(private val context: Context) {
                 if (hourDiff <= 2) {
                     var score = 1.0
 
-                    // Weight 1: Recency (Optional - we can assume newer data is slightly better, but skipping for simplicity)
+                    // 2. Headphone Score
+                    if (isHeadphones && event.isHeadphonesConnected) score += 3.0
 
-                    // Weight 2: Headphones (Strong predictor for Music/Audiobooks)
-                    if (isHeadphones && event.isHeadphonesConnected) {
-                        score += 3.0
-                    }
-
-                    // Weight 3: Wi-Fi (Strong predictor for "Home" vs "Work" vs "Gym")
-                    if (currentWifi != "None" && event.wifiSsid == currentWifi) {
-                        score += 2.0
+                    // 3. Location Score (The new "Super Predictor")
+                    // If within 100 meters, give massive points
+                    val distance = calculateDistance(currentLat, currentLong, event.latitude, event.longitude)
+                    if (distance < 100) {
+                        score += 5.0
                     }
 
                     val app = event.appPackageName
-
-                    // FIX: Ignore "UNKNOWN" so we don't crash the widget
                     if (app != "UNKNOWN" &&
                         app != "com.sec.android.app.launcher" &&
                         app != "com.android.systemui") {
-
                         appScores[app] = (appScores[app] ?: 0.0) + score
                     }
                 }
             }
 
-            // 3. Find the Winner
             val winner = appScores.maxByOrNull { it.value }
-
-            // Return the app package name, or a default string if nothing won
             winner?.key ?: "No Prediction"
         }
     }
 
-    // NEW: Calculate how likely a specific activity is at this hour
-    suspend fun calculateActivityProbability(
-        targetActivity: String,
-        currentHour: Int
-    ): Double {
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
+        if (lat1 == 0.0 || lat2 == 0.0) return Float.MAX_VALUE
+        val result = FloatArray(1)
+        Location.distanceBetween(lat1, lon1, lat2, lon2, result)
+        return result[0]
+    }
+
+    // NEW LOGIC: Instead of predicting "Driving" (Activity), we predict "Maps" (App)
+    suspend fun calculateAppProbabilityAtTime(targetPackage: String, currentHour: Int): Double {
         return withContext(Dispatchers.IO) {
             val db = AppDatabase.getDatabase(context)
             val dao = db.userEventDao()
-            val allEvents = dao.getAllEvents() // We need to look at everything
+            val allEvents = dao.getAllEvents()
 
             if (allEvents.isEmpty()) return@withContext 0.0
 
@@ -95,13 +90,13 @@ class BayesianPredictor(private val context: Context) {
 
                 if (hourDiff <= 1) {
                     totalEventsAtTime++
-                    if (event.activityType == targetActivity) {
+                    if (event.appPackageName == targetPackage) {
                         targetEventsAtTime++
                     }
                 }
             }
 
-            if (totalEventsAtTime < 5) return@withContext 0.0 // Not enough data yet
+            if (totalEventsAtTime < 5) return@withContext 0.0 // Need at least 5 data points to guess
 
             // Return percentage (0.0 to 1.0)
             return@withContext targetEventsAtTime.toDouble() / totalEventsAtTime.toDouble()

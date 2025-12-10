@@ -1,5 +1,6 @@
 package com.example.predictor
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -35,16 +36,22 @@ class PredictorWidget : AppWidgetProvider() {
         fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
             val scope = CoroutineScope(Dispatchers.IO)
             scope.launch {
-                // 1. GATHER CONTEXT
+// 1. GATHER CONTEXT
                 val calendar = Calendar.getInstance()
                 val hour = calendar.get(Calendar.HOUR_OF_DAY)
                 val activity = ActivityTransitionReceiver.currentActivity
                 val wifi = getWifiSsid(context)
                 val headphones = checkHeadphones(context)
 
+                // NEW: Get Location for prediction
+                val location = getBestLocation(context)
+                val lat = location?.latitude ?: 0.0
+                val lon = location?.longitude ?: 0.0
+
                 // 2. ASK THE BRAIN
                 val predictor = BayesianPredictor(context)
-                val predictedPkg = predictor.predictTopApp(activity, hour, headphones, wifi)
+                // Pass lat/long here
+                val predictedPkg = predictor.predictTopApp(activity, hour, headphones, wifi, lat, lon)
 
                 // 3. PREPARE THE VIEW
                 val views = RemoteViews(context.packageName, R.layout.widget_predictor_layout)
@@ -98,6 +105,20 @@ class PredictorWidget : AppWidgetProvider() {
             }
         }
 
+        @SuppressLint("MissingPermission")
+        private fun getBestLocation(context: Context): android.location.Location? {
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val providers = locationManager.getProviders(true)
+            var bestLocation: android.location.Location? = null
+            for (provider in providers) {
+                val l = locationManager.getLastKnownLocation(provider) ?: continue
+                if (bestLocation == null || l.accuracy < bestLocation.accuracy) {
+                    bestLocation = l
+                }
+            }
+            return bestLocation
+        }
+
         // --- Helpers ---
         private fun drawableToBitmap(drawable: Drawable): Bitmap {
             if (drawable is BitmapDrawable) return drawable.bitmap
@@ -107,6 +128,7 @@ class PredictorWidget : AppWidgetProvider() {
             drawable.draw(canvas)
             return bitmap
         }
+
 
         // (We duplicate these small helpers here to keep the Widget standalone)
         private fun getWifiSsid(context: Context): String {
