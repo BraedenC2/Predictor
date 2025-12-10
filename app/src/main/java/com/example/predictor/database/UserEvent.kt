@@ -6,11 +6,12 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "user_events")
 data class UserEvent(
     @PrimaryKey(autoGenerate = true) val uid: Int = 0,
-    val timestamp: Long,            // When it happened (Unix time)
-    val hourOfDay: Int,             // 0-23
-    val dayOfWeek: Int,             // 1-7 (Sun-Sat)
-    val activityType: String,       // "Walking", "Still", "In_Vehicle"
+    val timestamp: Long,
+    val hourOfDay: Int,
+    val minute: Int,                // NEW: Precision tracking (0-59)
+    val dayOfWeek: Int,
+    val activityType: String,
     val isHeadphonesConnected: Boolean,
-    val wifiSsid: String,           // "Home_WiFi", "Starbucks", or "None"
-    val appPackageName: String      // "com.spotify.music"
+    val wifiSsid: String,
+    val appPackageName: String
 )

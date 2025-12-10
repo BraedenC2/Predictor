@@ -5,13 +5,9 @@ import android.content.Context
 import android.content.Intent
 import com.google.android.gms.location.ActivityTransitionResult
 import com.google.android.gms.location.DetectedActivity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class ActivityTransitionReceiver : BroadcastReceiver() {
 
-    // We will save the latest activity here so other parts of the app can grab it
     companion object {
         var currentActivity: String = "UNKNOWN"
     }
@@ -21,9 +17,12 @@ class ActivityTransitionReceiver : BroadcastReceiver() {
             val result = ActivityTransitionResult.extractResult(intent)
             result?.let {
                 for (event in it.transitionEvents) {
-                    // We only care when you ENTER a state (not when you exit)
                     if (event.transitionType == com.google.android.gms.location.ActivityTransition.ACTIVITY_TRANSITION_ENTER) {
                         currentActivity = getActivityString(event.activityType)
+                    } else if (event.transitionType == com.google.android.gms.location.ActivityTransition.ACTIVITY_TRANSITION_EXIT) {
+                        // FIX: If we stop doing something, reset to UNKNOWN until we get a new "Enter" event
+                        // This prevents getting stuck in "WALKING" forever
+                        currentActivity = "UNKNOWN"
                     }
                 }
             }

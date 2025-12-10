@@ -1,7 +1,10 @@
 package com.example.predictor
 
 import android.Manifest
-import android.content.Intent
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiInfo
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -16,20 +19,18 @@ import androidx.compose.ui.unit.dp
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.OneTimeWorkRequestBuilder
 import com.example.predictor.logic.BayesianPredictor
 import com.example.predictor.sensors.ActivitySensor
 import com.example.predictor.sensors.ActivityTransitionReceiver
 import com.example.predictor.sensors.UsageCollector
 import com.example.predictor.ui.theme.PredictorTheme
 import com.example.predictor.workers.DataLoggerWorker
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
-// Import for the WiFi check logic (we'll duplicate the worker logic briefly for the UI)
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.wifi.WifiInfo
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
@@ -42,6 +43,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        createNotificationChannel()
         // 1. Schedule Background Worker
         val workRequest = PeriodicWorkRequestBuilder<DataLoggerWorker>(15, TimeUnit.MINUTES)
             .build()
@@ -57,6 +59,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AppContent()
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Predictor Alerts"
+            val descriptionText = "Smart predictions about your day"
+            val importance = android.app.NotificationManager.IMPORTANCE_HIGH
+            val channel = android.app.NotificationChannel("predictor_channel", name, importance).apply {
+                description = descriptionText
+            }
+            val notificationManager: android.app.NotificationManager =
+                getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            notificationManager.createNotificationChannel(channel)
         }
     }
 
@@ -95,7 +111,21 @@ class MainActivity : ComponentActivity() {
         var prediction by remember { mutableStateOf("Tap to Predict") }
         var currentDetails by remember { mutableStateOf("Waiting...") }
 
-        // Request Permissions on load
+        // Time Machine State
+        var isTimeMachineEnabled by remember { mutableStateOf(false) }
+        var timeMachineHour by remember { mutableFloatStateOf(12f) } // 12 PM default
+
+        // --- TURBO MODE ---
+        val context = androidx.compose.ui.platform.LocalContext.current
+        LaunchedEffect(Unit) {
+            while (true) {
+                val request = OneTimeWorkRequestBuilder<DataLoggerWorker>().build()
+                WorkManager.getInstance(context).enqueue(request)
+                delay(15_000)
+            }
+        }
+
+        // Permissions Check
         LaunchedEffect(Unit) {
             val permissions = mutableListOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -114,28 +144,61 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(text = "Predictor Brain", style = MaterialTheme.typography.headlineLarge)
+            // Header
+            Text(
+                text = if (isTimeMachineEnabled) "Time Machine Mode" else "Predictor: TURBO MODE",
+                style = MaterialTheme.typography.headlineMedium,
+                color = if (isTimeMachineEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // TIME MACHINE CONTROLS
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(text = "Current Context:", style = MaterialTheme.typography.titleMedium)
-                    Text(text = currentDetails)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "Enable Time Travel", style = MaterialTheme.typography.titleMedium)
+                        Switch(
+                            checked = isTimeMachineEnabled,
+                            onCheckedChange = { isTimeMachineEnabled = it }
+                        )
+                    }
+
+                    if (isTimeMachineEnabled) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(text = "Simulated Hour: ${timeMachineHour.roundToInt()}:00")
+                        Slider(
+                            value = timeMachineHour,
+                            onValueChange = { timeMachineHour = it },
+                            valueRange = 0f..23f,
+                            steps = 22 // Allows snapping to exact hours
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            // PREDICTION BUTTON
             Button(
                 onClick = {
                     scope.launch {
-                        // 1. Gather Real-time Context
-                        val calendar = Calendar.getInstance()
-                        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+                        // 1. Gather Context
                         val activity = ActivityTransitionReceiver.currentActivity
                         val wifi = getWifiSsid(this@MainActivity)
                         val headphones = checkHeadphones(this@MainActivity)
+
+                        // LOGIC: Use Real Time OR Fake Time?
+                        val calendar = Calendar.getInstance()
+                        val hour = if (isTimeMachineEnabled) {
+                            timeMachineHour.roundToInt()
+                        } else {
+                            calendar.get(Calendar.HOUR_OF_DAY)
+                        }
 
                         currentDetails = "Activity: $activity\nTime: $hour:00\nWiFi: $wifi\nHeadphones: $headphones"
 
@@ -143,14 +206,12 @@ class MainActivity : ComponentActivity() {
                         val predictor = BayesianPredictor(this@MainActivity)
                         val result = predictor.predictTopApp(activity, hour, headphones, wifi)
 
-                        // 3. Show Result
-                        // (Cleanup the package name to make it readable)
                         prediction = result.substringAfterLast(".")
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
-                Text("Analyze & Predict")
+                Text(if (isTimeMachineEnabled) "Predict Future" else "Analyze Now")
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -161,10 +222,14 @@ class MainActivity : ComponentActivity() {
                 style = MaterialTheme.typography.displayMedium,
                 color = MaterialTheme.colorScheme.primary
             )
+
+            if (isTimeMachineEnabled) {
+                Text(text = "(Based on historical data for ${timeMachineHour.roundToInt()}:00)", style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 
-    // --- Helper Functions for UI ---
+    // --- Helper Functions ---
 
     private fun getWifiSsid(context: Context): String {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

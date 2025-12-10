@@ -30,8 +30,9 @@ class UsageCollector(private val context: Context) {
         val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val currentTime = System.currentTimeMillis()
 
-        // Query events from the last 10 seconds to ensure we catch the latest move
-        val events = usageStatsManager.queryEvents(currentTime - 1000 * 10, currentTime)
+        // FIX: Look back 5 minutes (300,000 ms) instead of 10 seconds.
+        // We want to know the last app you interacted with, even if it was a few minutes ago.
+        val events = usageStatsManager.queryEvents(currentTime - 1000 * 60 * 5, currentTime)
         val usageEvent = UsageEvents.Event()
 
         var lastApp = "UNKNOWN"
@@ -39,7 +40,8 @@ class UsageCollector(private val context: Context) {
 
         while (events.hasNextEvent()) {
             events.getNextEvent(usageEvent)
-            if (usageEvent.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+            // We verify it's the latest event
+            if (usageEvent.eventType == UsageEvents.Event.ACTIVITY_RESUMED && usageEvent.timeStamp > lastTime) {
                 lastApp = usageEvent.packageName
                 lastTime = usageEvent.timeStamp
             }

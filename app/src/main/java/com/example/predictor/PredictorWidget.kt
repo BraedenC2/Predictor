@@ -38,7 +38,7 @@ class PredictorWidget : AppWidgetProvider() {
                 // 1. GATHER CONTEXT
                 val calendar = Calendar.getInstance()
                 val hour = calendar.get(Calendar.HOUR_OF_DAY)
-                val activity = ActivityTransitionReceiver.currentActivity // Requires your app to be running/background
+                val activity = ActivityTransitionReceiver.currentActivity
                 val wifi = getWifiSsid(context)
                 val headphones = checkHeadphones(context)
 
@@ -54,19 +54,19 @@ class PredictorWidget : AppWidgetProvider() {
                     try {
                         val packageManager = context.packageManager
 
-                        // Get the real App Icon
-                        val appIcon = packageManager.getApplicationIcon(predictedPkg)
-                        val appLabel = packageManager.getApplicationLabel(
-                            packageManager.getApplicationInfo(predictedPkg, 0)
-                        )
-
-                        // Convert Drawable to Bitmap for the Widget
-                        views.setImageViewBitmap(R.id.widget_icon, drawableToBitmap(appIcon))
-                        views.setTextViewText(R.id.widget_text, appLabel)
-
-                        // Create the "Open App" Action
+                        // SAFETY CHECK 1: Can we actually launch this app?
                         val launchIntent = packageManager.getLaunchIntentForPackage(predictedPkg)
+
                         if (launchIntent != null) {
+                            // Yes, it's a real app (like Spotify). Show it.
+                            val appIcon = packageManager.getApplicationIcon(predictedPkg)
+                            val appLabel = packageManager.getApplicationLabel(
+                                packageManager.getApplicationInfo(predictedPkg, 0)
+                            )
+
+                            views.setImageViewBitmap(R.id.widget_icon, drawableToBitmap(appIcon))
+                            views.setTextViewText(R.id.widget_text, appLabel)
+
                             val pendingIntent = PendingIntent.getActivity(
                                 context,
                                 0,
@@ -74,14 +74,21 @@ class PredictorWidget : AppWidgetProvider() {
                                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                             )
                             views.setOnClickPendingIntent(R.id.widget_icon, pendingIntent)
+                        } else {
+                            // No, it's a background process (like 'com.android.systemui').
+                            // Treat it as "Learning..." instead of crashing.
+                            views.setImageViewResource(R.id.widget_icon, android.R.drawable.sym_def_app_icon)
+                            views.setTextViewText(R.id.widget_text, "Learning...")
+                            // Remove click action
+                            views.setOnClickPendingIntent(R.id.widget_icon, null)
                         }
 
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        views.setTextViewText(R.id.widget_text, "Error")
+                        // SAFETY CHECK 2: Show the specific error so we know what to fix
+                        views.setTextViewText(R.id.widget_text, "Err: ${e.javaClass.simpleName}")
                     }
                 } else {
-                    // Default State (If it doesn't know what you want)
                     views.setImageViewResource(R.id.widget_icon, android.R.drawable.sym_def_app_icon)
                     views.setTextViewText(R.id.widget_text, "Learning...")
                 }

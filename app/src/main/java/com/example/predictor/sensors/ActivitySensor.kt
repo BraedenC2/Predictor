@@ -16,39 +16,38 @@ class ActivitySensor(private val context: Context) {
 
     private val client = ActivityRecognition.getClient(context)
 
-    // We list the movements we care about
+    // FIX: Listen for both STARTING (Enter) and STOPPING (Exit) an activity
     private val transitions = listOf(
-        getTransition(DetectedActivity.STILL),
-        getTransition(DetectedActivity.WALKING),
-        getTransition(DetectedActivity.RUNNING),
-        getTransition(DetectedActivity.IN_VEHICLE)
+        getTransition(DetectedActivity.STILL, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+        getTransition(DetectedActivity.WALKING, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+        getTransition(DetectedActivity.RUNNING, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+        getTransition(DetectedActivity.IN_VEHICLE, ActivityTransition.ACTIVITY_TRANSITION_ENTER),
+
+        getTransition(DetectedActivity.STILL, ActivityTransition.ACTIVITY_TRANSITION_EXIT),
+        getTransition(DetectedActivity.WALKING, ActivityTransition.ACTIVITY_TRANSITION_EXIT),
+        getTransition(DetectedActivity.RUNNING, ActivityTransition.ACTIVITY_TRANSITION_EXIT),
+        getTransition(DetectedActivity.IN_VEHICLE, ActivityTransition.ACTIVITY_TRANSITION_EXIT)
     )
 
-    private fun getTransition(activityType: Int): ActivityTransition {
+    private fun getTransition(activityType: Int, transitionType: Int): ActivityTransition {
         return ActivityTransition.Builder()
             .setActivityType(activityType)
-            .setActivityTransition(ActivityTransition.ACTIVITY_TRANSITION_ENTER)
+            .setActivityTransition(transitionType)
             .build()
     }
 
     private val pendingIntent: PendingIntent by lazy {
         val intent = Intent(context, ActivityTransitionReceiver::class.java)
-        // FLAG_MUTABLE is required for Android 12+ (API 31+)
         PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
     }
 
-    @SuppressLint("MissingPermission") // We check permissions before calling this
+    @SuppressLint("MissingPermission")
     fun startMonitoring() {
-        // Ensure we have permission
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
             val request = ActivityTransitionRequest(transitions)
             client.requestActivityTransitionUpdates(request, pendingIntent)
-                .addOnSuccessListener {
-                    // Successfully registered
-                }
-                .addOnFailureListener {
-                    // Failed to register
-                }
+                .addOnSuccessListener { }
+                .addOnFailureListener { }
         }
     }
 

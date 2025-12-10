@@ -52,8 +52,12 @@ class BayesianPredictor(private val context: Context) {
                     }
 
                     val app = event.appPackageName
-                    // Don't predict the launcher itself or the system UI
-                    if (app != "com.sec.android.app.launcher" && app != "com.android.systemui") {
+
+                    // FIX: Ignore "UNKNOWN" so we don't crash the widget
+                    if (app != "UNKNOWN" &&
+                        app != "com.sec.android.app.launcher" &&
+                        app != "com.android.systemui") {
+
                         appScores[app] = (appScores[app] ?: 0.0) + score
                     }
                 }
@@ -64,6 +68,43 @@ class BayesianPredictor(private val context: Context) {
 
             // Return the app package name, or a default string if nothing won
             winner?.key ?: "No Prediction"
+        }
+    }
+
+    // NEW: Calculate how likely a specific activity is at this hour
+    suspend fun calculateActivityProbability(
+        targetActivity: String,
+        currentHour: Int
+    ): Double {
+        return withContext(Dispatchers.IO) {
+            val db = AppDatabase.getDatabase(context)
+            val dao = db.userEventDao()
+            val allEvents = dao.getAllEvents() // We need to look at everything
+
+            if (allEvents.isEmpty()) return@withContext 0.0
+
+            var totalEventsAtTime = 0
+            var targetEventsAtTime = 0
+
+            for (event in allEvents) {
+                // Check if this memory happened at the same time (+/- 1 hour)
+                val hourDiff = minOf(
+                    abs(event.hourOfDay - currentHour),
+                    24 - abs(event.hourOfDay - currentHour)
+                )
+
+                if (hourDiff <= 1) {
+                    totalEventsAtTime++
+                    if (event.activityType == targetActivity) {
+                        targetEventsAtTime++
+                    }
+                }
+            }
+
+            if (totalEventsAtTime < 5) return@withContext 0.0 // Not enough data yet
+
+            // Return percentage (0.0 to 1.0)
+            return@withContext targetEventsAtTime.toDouble() / totalEventsAtTime.toDouble()
         }
     }
 }
